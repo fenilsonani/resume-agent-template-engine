@@ -53,15 +53,35 @@ class DocumentRequest(BaseModel):
     clean_up: bool = True
 
 def validate_date_format(date_str: str) -> bool:
-    """Validate date format (YYYY-MM or YYYY-MM-DD)"""
+    """
+    Validate date format (YYYY-MM, YYYY-MM-DD, or MM-YYYY)
+    
+    Args:
+        date_str: Date string to validate
+        
+    Returns:
+        bool: True if date format is valid, False otherwise
+    """
     try:
-        if len(date_str) == 7:  # YYYY-MM
+        if date_str == "Present":
+            return True
+            
+        # Try YYYY-MM format
+        if len(date_str) == 7 and date_str[4] == '-':
             datetime.strptime(date_str, "%Y-%m")
-        elif len(date_str) == 10:  # YYYY-MM-DD
+            return True
+            
+        # Try MM-YYYY format
+        if len(date_str) == 7 and date_str[2] == '-':
+            datetime.strptime(date_str, "%m-%Y")
+            return True
+            
+        # Try YYYY-MM-DD format
+        if len(date_str) == 10:
             datetime.strptime(date_str, "%Y-%m-%d")
-        else:
-            return False
-        return True
+            return True
+            
+        return False
     except ValueError:
         return False
 
