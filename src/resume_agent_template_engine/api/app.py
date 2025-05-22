@@ -1,11 +1,12 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, validator
 from typing import Dict, Any, Optional, List
 import os
 import json
-from resume_agent_template_engine.core.resume_template_editing import TemplateEditing
+# from resume_agent_template_engine.core.resume_template_editing import TemplateEditing # Not used directly in app.py for now
 from resume_agent_template_engine.templates.template_manager import TemplateManager
+from resume_agent_template_engine.core.docx_generator import generate_resume_docx # Import DOCX generator
 import tempfile
 import uvicorn
 from enum import Enum
@@ -37,6 +38,10 @@ class DocumentType(str, Enum):
     RESUME = "resume"
     COVER_LETTER = "cover_letter"
 
+class OutputFormat(str, Enum):
+    PDF = "pdf"
+    DOCX = "docx"
+
 class PersonalInfo(BaseModel):
     name: str
     email: EmailStr
@@ -45,40 +50,84 @@ class PersonalInfo(BaseModel):
     website: Optional[str] = None
     linkedin: Optional[str] = None
 
-class DocumentRequest(BaseModel):
-    document_type: DocumentType
-    template: str
-    format: str = "pdf"
-    data: Dict[str, Any]
-    clean_up: bool = True
-
-def validate_date_format(date_str: str) -> bool:
-    """Validate date format (YYYY-MM or YYYY-MM-DD)"""
+# Helper function for date validation logic (used by Pydantic validators)
+def check_date_format(date_str: str) -> str:
     try:
         if len(date_str) == 7:  # YYYY-MM
             datetime.strptime(date_str, "%Y-%m")
         elif len(date_str) == 10:  # YYYY-MM-DD
             datetime.strptime(date_str, "%Y-%m-%d")
         else:
-            return False
-        return True
+            raise ValueError("Date format must be YYYY-MM or YYYY-MM-DD")
+        return date_str
     except ValueError:
-        return False
+        raise ValueError(f"Invalid date format: {date_str}. Use YYYY-MM or YYYY-MM-DD")
 
-def validate_resume_data(data: Dict[str, Any]):
-    """Validate resume data structure and content"""
-    if "personalInfo" not in data:
-        raise ValueError("Personal information is required")
-    
-    personal_info = PersonalInfo(**data["personalInfo"])
-    
-    # Validate dates in experience
-    if "experience" in data and isinstance(data["experience"], list):
-        for exp in data["experience"]:
-            if "startDate" in exp and not validate_date_format(exp["startDate"]):
-                raise ValueError(f"Invalid start date format: {exp['startDate']}. Use YYYY-MM or YYYY-MM-DD")
-            if "endDate" in exp and exp["endDate"] != "Present" and not validate_date_format(exp["endDate"]):
-                raise ValueError(f"Invalid end date format: {exp['endDate']}. Use YYYY-MM or YYYY-MM-DD")
+# The old `validate_date_format` and `validate_resume_data` functions 
+# have been removed as their functionality is now covered by Pydantic models and validators.
+
+class ExperienceItem(BaseModel):
+    title: str
+    company: str
+    location: Optional[str] = None
+    startDate: str
+    endDate: str # Can also be "Present"
+    details: Optional[List[str]] = None
+
+    @validator('startDate')
+    def validate_start_date(cls, value):
+        return check_date_format(value)
+
+    @validator('endDate')
+    def validate_end_date(cls, value):
+        if value == "Present":
+            return value
+        return check_date_format(value)
+
+class EducationItem(BaseModel):
+    degree: str
+    institution: str
+    location: Optional[str] = None
+    date: Optional[str] = None # Could be a year, range, or specific date. For now, simple string.
+    details: Optional[List[str]] = None
+
+class ProjectItem(BaseModel):
+    name: str
+    description: Optional[str] = None
+    technologies: Optional[List[str]] = None
+    url: Optional[str] = None
+
+class PublicationItem(BaseModel):
+    title: str
+    publisher: Optional[str] = None
+    date: Optional[str] = None # Similar to education date
+    url: Optional[str] = None
+
+class CertificationItem(BaseModel):
+    name: str
+    issuer: Optional[str] = None
+    date: Optional[str] = None # Similar to education date
+    url: Optional[str] = None
+
+
+class ResumeData(BaseModel):
+    personalInfo: PersonalInfo
+    professional_summary: Optional[str] = None
+    experience: Optional[List[ExperienceItem]] = None
+    education: Optional[List[EducationItem]] = None
+    projects: Optional[List[ProjectItem]] = None
+    articles_and_publications: Optional[List[PublicationItem]] = None
+    achievements: Optional[List[str]] = None
+    certifications: Optional[List[CertificationItem]] = None
+    technologies_and_skills: Optional[List[str]] = None
+    # Add other fields as necessary based on common resume structures or future needs
+
+class DocumentRequest(BaseModel):
+    document_type: DocumentType
+    template: str # Kept for PDF, might be ignored or used differently for DOCX if no "template" concept applies
+    format: OutputFormat = OutputFormat.PDF # Use the OutputFormat Enum
+    data: ResumeData 
+    clean_up: bool = True
 
 @app.post("/generate")
 async def generate_document(request: DocumentRequest, background_tasks: BackgroundTasks):
@@ -93,8 +142,8 @@ async def generate_document(request: DocumentRequest, background_tasks: Backgrou
         FileResponse containing the generated document
     """
     try:
-        # Validate data format
-        validate_resume_data(request.data)
+        # Data validation is now handled by Pydantic models.
+        # The call to validate_resume_data(request.data) is no longer needed.
         
         # Initialize template manager to validate templates
         template_manager = TemplateManager()
@@ -113,41 +162,77 @@ async def generate_document(request: DocumentRequest, background_tasks: Backgrou
                 status_code=404, 
                 detail=f"Template '{request.template}' not found for {request.document_type}. Available templates: {available_templates[request.document_type]}"
             )
+        
+        # Prepare common variables
+        person_name = request.data.personalInfo.name.replace(' ', '_') if request.data.personalInfo and request.data.personalInfo.name else 'output'
+        
+        if request.format == OutputFormat.PDF:
+            # Validate template for PDF generation
+            if request.document_type not in available_templates:
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Document type '{request.document_type}' not supported for PDF. Available types: {list(available_templates.keys())}"
+                )
+            if request.template not in available_templates[request.document_type]:
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Template '{request.template}' not found for {request.document_type}. Available templates: {available_templates[request.document_type]}"
+                )
+
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
+                output_path = tmp_file.name
             
-        # Validate format (currently only PDF is supported)
-        if request.format.lower() != "pdf":
-            raise HTTPException(status_code=400, detail="Only PDF format is currently supported")
+            try:
+                template_instance = template_manager.create_template(
+                    request.document_type, 
+                    request.template, 
+                    request.data.dict(exclude_unset=True)
+                )
+                template_instance.export_to_pdf(output_path)
+                
+                filename = f"{request.document_type.value}_{person_name}.pdf"
+                media_type = 'application/pdf'
+                
+            except Exception as e: # Catch specific errors from PDF generation if possible
+                if os.path.exists(output_path): # Cleanup temp file on error
+                    os.remove(output_path)
+                raise HTTPException(status_code=500, detail=f"PDF Generation Error: {str(e)}")
+
+        elif request.format == OutputFormat.DOCX:
+            if request.document_type == DocumentType.COVER_LETTER:
+                 raise HTTPException(status_code=400, detail="DOCX format is currently only supported for resumes.")
+
+            with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_file:
+                output_path = tmp_file.name
             
-        # Create temporary file for the output
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
-            output_path = tmp_file.name
+            try:
+                generate_resume_docx(
+                    resume_data_dict=request.data.dict(exclude_unset=True), 
+                    output_path=output_path
+                )
+                filename = f"resume_{person_name}.docx" # DOCX only for resume for now
+                media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+            except Exception as e: # Catch specific errors from DOCX generation
+                if os.path.exists(output_path): # Cleanup temp file on error
+                    os.remove(output_path)
+                raise HTTPException(status_code=500, detail=f"DOCX Generation Error: {str(e)}")
+        
+        else:
+            # This case should ideally not be reached if OutputFormat Enum is used correctly
+            raise HTTPException(status_code=400, detail=f"Unsupported format: {request.format}")
+
+        # Common return logic for successful generation
+        if request.clean_up:
+            background_tasks.add_task(os.remove, output_path)
+        
+        return FileResponse(
+            output_path,
+            media_type=media_type,
+            filename=filename
+        )
             
-        try:
-            # Generate the document
-            template = template_manager.create_template(request.document_type, request.template, request.data)
-            template.export_to_pdf(output_path)
-            
-            # Determine filename based on document type
-            person_name = request.data.get('personalInfo', {}).get('name', 'output').replace(' ', '_')
-            filename = f"{request.document_type}_{person_name}.pdf"
-            
-            # Add cleanup task if requested
-            if request.clean_up:
-                background_tasks.add_task(os.remove, output_path)
-            
-            # Return the generated file
-            return FileResponse(
-                output_path,
-                media_type='application/pdf',
-                filename=filename
-            )
-        except Exception as e:
-            # Clean up the temporary file if generation fails
-            if os.path.exists(output_path):
-                os.remove(output_path)
-            raise e
-            
-    except ValueError as e:
+    except ValueError as e: # Catches Pydantic validation errors and others
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException as e:
         raise e

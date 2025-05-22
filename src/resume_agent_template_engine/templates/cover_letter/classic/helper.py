@@ -4,15 +4,15 @@ import os
 import tempfile
 from typing import Dict, Any
 
-class ModernCoverLetterTemplate:
+class ClassicCoverLetterHelper:
     """
-    Helper class for generating a Modern LaTeX cover letter from JSON data.
+    Helper class for generating a Classic LaTeX cover letter from JSON data.
     Handles special characters: &, %, $, #
     """
 
     def __init__(self, data: Dict[str, Any]) -> None:
         """
-        Initialize the ModernCoverLetterTemplate class.
+        Initialize the ClassicCoverLetterHelper class.
 
         Args:
             data (dict): The JSON data containing cover letter information.

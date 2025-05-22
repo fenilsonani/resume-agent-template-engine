@@ -16,32 +16,61 @@ def setup_and_cleanup():
     os.makedirs("templates/resume/modern", exist_ok=True)
     os.makedirs("templates/cover_letter/modern", exist_ok=True)
     
-    # Create helper.py
+    # Create helper.py for "modern" resume
     with open("templates/resume/modern/helper.py", "w") as f:
         f.write("""
-class ModernResumeTemplate:
+class ModernResumeHelper: # Updated to new convention
     def __init__(self, data):
         self.data = data
     
     def export_to_pdf(self, output_path):
         with open(output_path, 'w') as f:
-            f.write("Test PDF content")
+            f.write("Test PDF content for modern resume") # Dummy PDF content
         return output_path
 """)
-    
-    # Create template.tex
     with open("templates/resume/modern/template.tex", "w") as f:
-        f.write(r"\documentclass{article}\begin{document}Test\end{document}")
+        f.write(r"\documentclass{article}\begin{document}Modern Resume Test\end{document}")
+
+    # Create helper.py for "modern" cover_letter (needed for some API tests)
+    os.makedirs("templates/cover_letter/modern", exist_ok=True) # Ensure this exists too
+    with open("templates/cover_letter/modern/helper.py", "w") as f:
+        f.write("""
+class ModernCoverLetterHelper:
+    def __init__(self, data):
+        self.data = data
+    def export_to_pdf(self, output_path):
+        with open(output_path, 'w') as f:
+            f.write("Test PDF content for modern cover letter")
+        return output_path
+""")
+    with open("templates/cover_letter/modern/template.tex", "w") as f:
+        f.write(r"\documentclass{article}\begin{document}Modern Cover Letter Test\end{document}")
     
+    # Create dummy files for "minimalist" and "twocolumn" for API tests if they rely on TemplateManager discovery
+    # These are simplified as their detailed testing is in test_template_manager.py
+    # Minimalist
+    os.makedirs("templates/resume/minimalist", exist_ok=True)
+    with open("templates/resume/minimalist/helper.py", "w") as f:
+        f.write("class MinimalistResumeHelper:\n    def __init__(self, data): pass\n    def export_to_pdf(self, path): open(path, 'w').write('Minimalist PDF')")
+    with open("templates/resume/minimalist/template.tex", "w") as f:
+        f.write("Minimalist Test")
+    
+    # Twocolumn
+    os.makedirs("templates/resume/twocolumn", exist_ok=True)
+    with open("templates/resume/twocolumn/helper.py", "w") as f:
+        f.write("class TwocolumnResumeHelper:\n    def __init__(self, data): pass\n    def export_to_pdf(self, path): open(path, 'w').write('Twocolumn PDF')")
+    with open("templates/resume/twocolumn/template.tex", "w") as f:
+        f.write("Twocolumn Test")
+
     yield
     
-    # Cleanup: Remove test files
-    if os.path.exists("templates/resume/modern/helper.py"):
-        os.remove("templates/resume/modern/helper.py")
-    if os.path.exists("templates/resume/modern/template.tex"):
-        os.remove("templates/resume/modern/template.tex")
+    # Cleanup: Remove test files and directories
+    # Use shutil.rmtree to remove directories and their contents
+    if os.path.exists("templates"):
+        shutil.rmtree("templates")
 
-# Test data
+
+# Test data (can be reused by different tests)
 valid_resume_data = {
     "personalInfo": {
         "name": "John Doe",
@@ -111,8 +140,13 @@ def test_list_templates():
 def test_list_templates_by_valid_type():
     response = client.get("/templates/resume")
     assert response.status_code == 200
-    assert "templates" in response.json()
-    assert "modern" in response.json()["templates"]
+    templates_json = response.json()
+    assert "templates" in templates_json
+    assert isinstance(templates_json["templates"], list)
+    # Check for all expected resume templates in the test setup
+    expected_resume_templates = ["modern", "minimalist", "twocolumn"]
+    for t_name in expected_resume_templates:
+        assert t_name in templates_json["templates"], f"{t_name} template not found in API response"
 
 def test_list_templates_by_invalid_type():
     response = client.get("/templates/invalid_type")
@@ -163,8 +197,10 @@ def test_generate_document_invalid_format():
         "clean_up": True
     }
     response = client.post("/generate", json=request_data)
-    assert response.status_code == 400
-    assert "Only PDF format is currently supported" in response.json()["detail"]
+    assert response.status_code == 422 # Changed due to Enum validation for 'format'
+    # Check for a more generic validation error message part if specific one is too brittle
+    assert "value_error.str.format" in response.text or "Input should be 'pdf' or 'docx'" in response.text
+
 
 def test_generate_document_invalid_template():
     request_data = {
@@ -247,10 +283,65 @@ def test_input_validation_invalid_date():
         "clean_up": True
     }
     response = client.post("/generate", json=request_data)
-    assert response.status_code == 400  # Bad Request for validation errors
-    assert "date" in response.json()["detail"].lower()
+    assert response.status_code == 422 # Pydantic v2 validation error code for this type of error
+    # Check details for field and error type
+    error_details = response.json().get("detail", [])
+    assert any(err.get("loc", [None])[0] == "data" and \
+               err.get("loc", [None, None])[1] == "experience" and \
+               "Input should be a valid date" in err.get("msg","").lower()
+               for err in error_details), "Detailed date validation error not found as expected."
+
+
+def test_generate_resume_docx_valid():
+    """Test successful DOCX generation for a resume."""
+    request_data = {
+        "document_type": "resume",
+        "template": "classic", # Template name is less relevant for DOCX, but still required by model
+        "format": "docx",
+        "data": valid_resume_data,
+        "clean_up": True 
+    }
+    response = client.post("/generate", json=request_data)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert ".docx" in response.headers["content-disposition"]
+
+    # Optional: Verify content by trying to open with python-docx
+    # This requires saving the content to a temporary file
+    # from docx import Document as DocxDocumentImport
+    # import io
+    # try:
+    #     docx_file = io.BytesIO(response.content)
+    #     doc = DocxDocumentImport(docx_file)
+    #     assert len(doc.paragraphs) > 0
+    # except Exception as e:
+    #     pytest.fail(f"Failed to open or validate generated DOCX: {e}")
+
+
+def test_generate_cover_letter_docx_not_supported():
+    """Test that DOCX format is not supported for cover letters."""
+    # Construct a minimal valid data payload for a cover letter
+    valid_cover_letter_data = {
+        "personalInfo": {"name": "Jane Doe", "email": "jane@example.com"},
+        "recipient": {"name": "Hiring Team"},
+        "date": "2023-10-26",
+        "salutation": "Dear Hiring Team,",
+        "body": ["This is a test cover letter."],
+        "closing": "Sincerely,"
+    }
+    request_data = {
+        "document_type": "cover_letter",
+        "template": "modern", # A valid cover letter template
+        "format": "docx",
+        "data": valid_cover_letter_data,
+        "clean_up": True
+    }
+    response = client.post("/generate", json=request_data)
+    assert response.status_code == 400 # As per current implementation in app.py
+    assert "DOCX format is currently only supported for resumes" in response.json()["detail"]
+
 
 def test_read_main():
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json() == {"message": "Welcome to Resume Agent Template Engine"} 
+    assert response.json() == {"message": "Welcome to Resume Agent Template Engine"}

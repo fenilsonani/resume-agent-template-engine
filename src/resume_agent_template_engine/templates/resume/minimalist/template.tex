@@ -1,0 +1,108 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{helvet} % Use Helvetica-like font
+\renewcommand{\familydefault}{\sfdefault} % Set default font to sans-serif
+\usepackage{geometry}
+\geometry{a4paper, margin=0.75in} % Adjust margins for a cleaner look
+\usepackage{titlesec} % For customizing section titles
+\usepackage{mdwlist} % For compact lists
+\usepackage{ragged2e} % For RaggedRight alignment
+\usepackage{needspace} % To prevent awkward page breaks
+\usepackage{hyperref} % For clickable links
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=blue,
+    pdftitle={Resume},
+    pdfpagemode=FullScreen,
+}
+
+% Define colors
+\usepackage{xcolor}
+\definecolor{darkgray}{rgb}{0.25, 0.25, 0.25}
+\definecolor{lightgray}{rgb}{0.5, 0.5, 0.5}
+
+% Customize section titles
+\titleformat{\section}{\Large\bfseries\color{darkgray}\RaggedRight}{\thesection}{1em}{}[\titlerule]
+\titlespacing*{\section}{0pt}{1.5ex plus 1ex minus .2ex}{1ex plus .2ex}
+
+\titleformat{\subsection}{\large\bfseries\color{darkgray}\RaggedRight}{\thesubsection}{1em}{}
+\titlespacing*{\subsection}{0pt}{1ex plus 1ex minus .2ex}{0.5ex plus .2ex}
+
+% Name and Contact Info
+\newcommand{\personalinfo}[5]{
+    \begin{center}
+        {\Huge\bfseries\color{darkgray} #1}\\[0.5ex] % Name
+        \normalsize #2 \textperiodcentered\ #3 \textperiodcentered\ \href{mailto:#4}{#4} \textperiodcentered\ \href{#5}{#5}
+    \end{center}
+    \vspace{1em}
+}
+
+% Summary Section
+\newcommand{\summary}[1]{
+    \section*{Summary}
+    \small #1
+    \vspace{1em}
+}
+
+% Experience Section Item
+\newcommand{\experienceentry}[5]{ % Company, Title, Dates, Location, Details (list)
+    \subsection*{#1 \hfill \small\color{lightgray} #3}
+    \textit{#2 \hfill \small\color{lightgray} #4}\\[0.5ex]
+    \begin{itemize*} % Compact itemize
+        #5
+    \end{itemize*}
+    \vspace{0.5em}
+}
+
+% Education Section Item
+\newcommand{\educationentry}[4]{ % Degree, Institution, Dates, Details
+    \subsection*{#2 \hfill \small\color{lightgray}#3}
+    \textit{#1}\\[0.5ex]
+    \small #4
+    \vspace{0.5em}
+}
+
+% Skills Section
+\newcommand{\skills}[1]{ % Argument is a comma-separated list of skills
+    \section*{Skills}
+    \small #1
+    \vspace{1em}
+}
+
+% Projects Section Item
+\newcommand{\projectentry}[3]{ % Name, Technologies, Description
+    \subsection*{#1}
+    \textit{\small\color{lightgray}#2}\\[0.5ex]
+    \small #3
+    \vspace{0.5em}
+}
+
+% Placeholder commands from helper - these will be defined by the Python helper
+% and will contain the actual content formatted with the above commands.
+\newcommand{\personalinfosection}{}
+\newcommand{\summarysection}{}
+\newcommand{\experiencesection}{}
+\newcommand{\educationsection}{}
+\newcommand{\skillssection}{}
+\newcommand{\projectssection}{}
+\newcommand{\publicationssection}{} % Added for completeness, can be optional
+\newcommand{\certificationssection}{} % Added for completeness, can be optional
+
+\begin{document}
+\pagestyle{empty} % No page numbers
+
+% These commands will be populated by the helper script
+\personalinfosection
+\summarysection
+\experiencesection
+\educationsection
+\projectssection
+\skillssection
+% Optional sections - helper can leave them empty if no data
+% \publicationssection 
+% \certificationssection
+
+\end{document}
