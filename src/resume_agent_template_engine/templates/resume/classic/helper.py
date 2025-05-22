@@ -4,7 +4,7 @@ import os
 import tempfile
 from typing import Dict, Any
 
-class ClassicResumeTemplate:
+class ClassicResumeHelper:
     """
     Helper class for generating a Classic LaTeX resume from JSON data.
     Handles special characters: &, %, $, #
@@ -12,7 +12,7 @@ class ClassicResumeTemplate:
 
     def __init__(self, data: Dict[str, Any]) -> None:
         """
-        Initialize the ClassicResumeTemplate class.
+        Initialize the ClassicResumeHelper class.
 
         Args:
             data (dict): The JSON data containing resume information.

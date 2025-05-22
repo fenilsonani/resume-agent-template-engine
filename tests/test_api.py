@@ -19,13 +19,13 @@ def setup_and_cleanup():
     # Create helper.py
     with open("templates/resume/modern/helper.py", "w") as f:
         f.write("""
-class ModernResumeTemplate:
+class ModernResumeHelper: # Updated to new convention
     def __init__(self, data):
         self.data = data
     
     def export_to_pdf(self, output_path):
         with open(output_path, 'w') as f:
-            f.write("Test PDF content")
+            f.write("Test PDF content") # Dummy PDF content
         return output_path
 """)
     

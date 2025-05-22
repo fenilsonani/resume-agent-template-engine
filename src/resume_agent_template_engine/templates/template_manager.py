@@ -5,6 +5,7 @@ class TemplateManager:
     """
     A class for managing and accessing different templates in the resume agent system.
     """
+    _cached_templates = None
     
     def __init__(self, templates_dir="templates"):
         """
@@ -14,15 +15,21 @@ class TemplateManager:
             templates_dir (str): Path to the templates directory
         """
         self.templates_dir = templates_dir
-        self.available_templates = self._discover_templates()
-    
+        # Populate available_templates by calling get_available_templates,
+        # which in turn uses the (now cached) _discover_templates method.
+        self.available_templates = self.get_available_templates()
+
     def _discover_templates(self):
         """
         Discover available templates by scanning the templates directory.
+        Caches the results to avoid redundant disk I/O.
         
         Returns:
             dict: A dictionary mapping template categories to template names
         """
+        if TemplateManager._cached_templates is not None:
+            return TemplateManager._cached_templates
+
         templates = {}
         
         # Check if templates directory exists
@@ -54,6 +61,7 @@ class TemplateManager:
                 if os.path.exists(helper_path) and tex_files:
                     templates[category].append(template_name)
         
+        TemplateManager._cached_templates = templates
         return templates
     
     def get_available_templates(self, category=None):
@@ -67,12 +75,15 @@ class TemplateManager:
         Returns:
             dict or list: Available templates
         """
+        # Ensure templates are discovered and cached if not already
+        discovered_templates = self._discover_templates()
+
         if category:
-            if category not in self.available_templates:
+            if category not in discovered_templates:
                 raise ValueError(f"Category not found: {category}")
-            return self.available_templates[category]
+            return discovered_templates[category]
         
-        return self.available_templates
+        return discovered_templates
     
     def load_template(self, category, template_name):
         """
@@ -85,11 +96,14 @@ class TemplateManager:
         Returns:
             class: The template class
         """
+        # Ensure templates are discovered and available for validation
+        current_available_templates = self.get_available_templates()
+
         # Validate category and template name
-        if category not in self.available_templates:
+        if category not in current_available_templates:
             raise ValueError(f"Category not found: {category}")
         
-        if template_name not in self.available_templates[category]:
+        if template_name not in current_available_templates[category]:
             raise ValueError(f"Template not found: {template_name}")
         
         # Construct the path to the helper.py file
@@ -100,38 +114,27 @@ class TemplateManager:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         
-        # Find the class in the module
-        # First try conventional name format: ModernCoverLetterTemplate
-        class_name_options = []
-        
-        # For categories with underscores like "cover_letter", convert to CamelCase
+        # Construct the expected class name based on the new convention
+        # Category: 'cover_letter' -> 'CoverLetter'
         if "_" in category:
-            category_camel = ''.join(x.capitalize() for x in category.split('_'))
+            category_camel_case = ''.join(x.capitalize() for x in category.split('_'))
         else:
-            category_camel = category.capitalize()
+            category_camel_case = category.capitalize()
         
-        # Try multiple naming patterns
-        class_name_options = [
-            # ModernCoverLetterTemplate
-            f"{template_name.capitalize()}{category_camel}Template",
-            # CoverLetterModernTemplate 
-            f"{category_camel}{template_name.capitalize()}Template",
-            # ModernTemplate
-            f"{template_name.capitalize()}Template"
-        ]
+        # Expected name: TemplateNameCategoryHelper, e.g., ModernResumeHelper
+        expected_class_name = f"{template_name.capitalize()}{category_camel_case}Helper"
         
-        # Try each possible class name
-        for class_name in class_name_options:
-            if hasattr(module, class_name):
-                return getattr(module, class_name)
-        
-        # If we get here, no matching class was found
-        class_list = [name for name in dir(module) if not name.startswith('_') and name.endswith('Template')]
-        if class_list:
-            # If we found any template class, return the first one
-            return getattr(module, class_list[0])
-        
-        raise ValueError(f"Template class not found in {helper_path}. Tried: {', '.join(class_name_options)}")
+        try:
+            template_class = getattr(module, expected_class_name)
+            return template_class
+        except AttributeError:
+            # List all attributes in the module to help diagnose if the class exists with a slightly different name
+            module_attributes = [name for name in dir(module) if not name.startswith('_')]
+            raise ValueError(
+                f"Helper class '{expected_class_name}' not found in module {helper_path}. "
+                f"Ensure the class is defined in the helper file and matches this naming convention. "
+                f"Available attributes in module: {module_attributes}"
+            )
     
     def create_template(self, category, template_name, data):
         """

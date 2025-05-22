@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, validator
 from typing import Dict, Any, Optional, List
 import os
 import json
@@ -45,40 +45,84 @@ class PersonalInfo(BaseModel):
     website: Optional[str] = None
     linkedin: Optional[str] = None
 
-class DocumentRequest(BaseModel):
-    document_type: DocumentType
-    template: str
-    format: str = "pdf"
-    data: Dict[str, Any]
-    clean_up: bool = True
-
-def validate_date_format(date_str: str) -> bool:
-    """Validate date format (YYYY-MM or YYYY-MM-DD)"""
+# Helper function for date validation logic (used by Pydantic validators)
+def check_date_format(date_str: str) -> str:
     try:
         if len(date_str) == 7:  # YYYY-MM
             datetime.strptime(date_str, "%Y-%m")
         elif len(date_str) == 10:  # YYYY-MM-DD
             datetime.strptime(date_str, "%Y-%m-%d")
         else:
-            return False
-        return True
+            raise ValueError("Date format must be YYYY-MM or YYYY-MM-DD")
+        return date_str
     except ValueError:
-        return False
+        raise ValueError(f"Invalid date format: {date_str}. Use YYYY-MM or YYYY-MM-DD")
 
-def validate_resume_data(data: Dict[str, Any]):
-    """Validate resume data structure and content"""
-    if "personalInfo" not in data:
-        raise ValueError("Personal information is required")
-    
-    personal_info = PersonalInfo(**data["personalInfo"])
-    
-    # Validate dates in experience
-    if "experience" in data and isinstance(data["experience"], list):
-        for exp in data["experience"]:
-            if "startDate" in exp and not validate_date_format(exp["startDate"]):
-                raise ValueError(f"Invalid start date format: {exp['startDate']}. Use YYYY-MM or YYYY-MM-DD")
-            if "endDate" in exp and exp["endDate"] != "Present" and not validate_date_format(exp["endDate"]):
-                raise ValueError(f"Invalid end date format: {exp['endDate']}. Use YYYY-MM or YYYY-MM-DD")
+# The old `validate_date_format` and `validate_resume_data` functions 
+# have been removed as their functionality is now covered by Pydantic models and validators.
+
+class ExperienceItem(BaseModel):
+    title: str
+    company: str
+    location: Optional[str] = None
+    startDate: str
+    endDate: str # Can also be "Present"
+    details: Optional[List[str]] = None
+
+    @validator('startDate')
+    def validate_start_date(cls, value):
+        return check_date_format(value)
+
+    @validator('endDate')
+    def validate_end_date(cls, value):
+        if value == "Present":
+            return value
+        return check_date_format(value)
+
+class EducationItem(BaseModel):
+    degree: str
+    institution: str
+    location: Optional[str] = None
+    date: Optional[str] = None # Could be a year, range, or specific date. For now, simple string.
+    details: Optional[List[str]] = None
+
+class ProjectItem(BaseModel):
+    name: str
+    description: Optional[str] = None
+    technologies: Optional[List[str]] = None
+    url: Optional[str] = None
+
+class PublicationItem(BaseModel):
+    title: str
+    publisher: Optional[str] = None
+    date: Optional[str] = None # Similar to education date
+    url: Optional[str] = None
+
+class CertificationItem(BaseModel):
+    name: str
+    issuer: Optional[str] = None
+    date: Optional[str] = None # Similar to education date
+    url: Optional[str] = None
+
+
+class ResumeData(BaseModel):
+    personalInfo: PersonalInfo
+    professional_summary: Optional[str] = None
+    experience: Optional[List[ExperienceItem]] = None
+    education: Optional[List[EducationItem]] = None
+    projects: Optional[List[ProjectItem]] = None
+    articles_and_publications: Optional[List[PublicationItem]] = None
+    achievements: Optional[List[str]] = None
+    certifications: Optional[List[CertificationItem]] = None
+    technologies_and_skills: Optional[List[str]] = None
+    # Add other fields as necessary based on common resume structures or future needs
+
+class DocumentRequest(BaseModel):
+    document_type: DocumentType
+    template: str
+    format: str = "pdf"
+    data: ResumeData # Changed from Dict[str, Any] to ResumeData
+    clean_up: bool = True
 
 @app.post("/generate")
 async def generate_document(request: DocumentRequest, background_tasks: BackgroundTasks):
@@ -93,8 +137,8 @@ async def generate_document(request: DocumentRequest, background_tasks: Backgrou
         FileResponse containing the generated document
     """
     try:
-        # Validate data format
-        validate_resume_data(request.data)
+        # Data validation is now handled by Pydantic models.
+        # The call to validate_resume_data(request.data) is no longer needed.
         
         # Initialize template manager to validate templates
         template_manager = TemplateManager()
@@ -124,12 +168,13 @@ async def generate_document(request: DocumentRequest, background_tasks: Backgrou
             
         try:
             # Generate the document
-            template = template_manager.create_template(request.document_type, request.template, request.data)
+            # Pass request.data.dict() to maintain compatibility if create_template expects a dict
+            template = template_manager.create_template(request.document_type, request.template, request.data.dict(exclude_unset=True))
             template.export_to_pdf(output_path)
             
             # Determine filename based on document type
-            person_name = request.data.get('personalInfo', {}).get('name', 'output').replace(' ', '_')
-            filename = f"{request.document_type}_{person_name}.pdf"
+            person_name = request.data.personalInfo.name.replace(' ', '_') if request.data.personalInfo and request.data.personalInfo.name else 'output'
+            filename = f"{request.document_type.value}_{person_name}.pdf"
             
             # Add cleanup task if requested
             if request.clean_up:
